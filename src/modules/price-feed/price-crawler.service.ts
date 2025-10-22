@@ -37,7 +37,7 @@ export class PriceCrawlerService {
       // Lấy thông tin 24h
       const ticker24hResponse = await axios.get(`${this.baseUrl}/ticker/24hr`, {
         params: { symbol },
-      });
+      });             
 
       const ticker24h = ticker24hResponse.data;
 
