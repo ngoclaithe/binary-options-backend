@@ -19,13 +19,22 @@ import { OrderStatus } from './entities/order.entity';
 @Controller('trading')
 @UseGuards(JwtAuthGuard)
 export class TradingController {
-  constructor(private readonly tradingService: TradingService) {}
+  constructor(private readonly tradingService: TradingService) { }
 
   @Post('orders')
   @HttpCode(HttpStatus.CREATED)
   async createOrder(@Request() req, @Body() createOrderDto: CreateOrderDto) {
+    // console.log('📦 [DEBUG] Received DTO:', createOrderDto);
+    // console.log('📦 [DEBUG] Raw body type info:', {
+    //   assetId: typeof createOrderDto.assetId,
+    //   direction: typeof createOrderDto.direction,
+    //   investAmount: typeof createOrderDto.investAmount,
+    //   duration: typeof createOrderDto.duration,
+    // });
+
     return await this.tradingService.createOrder(req.user.userId, createOrderDto);
   }
+
 
   @Get('orders')
   async getUserOrders(

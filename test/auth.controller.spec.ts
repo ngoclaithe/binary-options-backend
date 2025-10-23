@@ -24,7 +24,6 @@ describe('AuthController', () => {
         authService = module.get<AuthService>(AuthService);
     });
 
-    // 🧩 Test login()
     it('should login and return access_token', async () => {
         const loginDto = { username: 'testuser', password: '123456' };
         const result = await authController.login(loginDto);
@@ -33,7 +32,6 @@ describe('AuthController', () => {
         expect(authService.login).toHaveBeenCalledWith(loginDto);
     });
 
-    // 🧩 Test register()
     it('should register new user', async () => {
         const registerDto = {
             username: 'newuser',
@@ -46,14 +44,12 @@ describe('AuthController', () => {
         expect(authService.register).toHaveBeenCalledWith(registerDto);
     });
 
-    // 🧩 Test getProfile()
     it('should return current user from request', async () => {
         const req = { user: { id: 1, username: 'john' } };
         const result = await authController.getProfile(req as any);
         expect(result).toEqual(req.user);
     });
 
-    // 🧩 Test verifyToken()
     it('should return valid: true and user', async () => {
         const req = { user: { id: 1, username: 'john' } };
         const result = await authController.verifyToken(req as any);
