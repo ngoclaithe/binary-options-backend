@@ -178,6 +178,21 @@ let PriceFeedService = PriceFeedService_1 = class PriceFeedService {
         }
         this.logger.log(`Initialized cache with ${this.latestPrices.size} prices`);
     }
+    async getPriceByTimestamp(symbol, targetMinuteTimestamp) {
+        const record = await this.detailedPriceRepo.findOne({
+            where: { symbol, minuteTimestamp: targetMinuteTimestamp },
+        });
+        if (!record)
+            return null;
+        return {
+            symbol: record.symbol,
+            minuteTimestamp: Number(record.minuteTimestamp),
+            open: Number(record.minuteOpen),
+            high: Number(record.minuteHigh),
+            low: Number(record.minuteLow),
+            close: Number(record.minuteClose),
+        };
+    }
 };
 exports.PriceFeedService = PriceFeedService;
 exports.PriceFeedService = PriceFeedService = PriceFeedService_1 = __decorate([

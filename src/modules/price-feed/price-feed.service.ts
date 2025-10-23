@@ -16,7 +16,7 @@ export class PriceFeedService {
     @InjectRepository(DetailedPriceData)
     private readonly detailedPriceRepo: Repository<DetailedPriceData>,
     private readonly priceCrawlerService: PriceCrawlerService,
-  ) {}
+  ) { }
 
   /**
    * Lấy giá mới nhất - trả về 60 giây của 2 phút trước
@@ -25,10 +25,10 @@ export class PriceFeedService {
   async getLatestPrice(symbol: string): Promise<any> {
     try {
       const now = Date.now();
-      
+
       // Lùi 2 phút so với hiện tại
       const twoMinutesAgo = now - (2 * 60 * 1000);
-      
+
       // Làm tròn xuống phút
       const targetMinuteTimestamp = Math.floor(twoMinutesAgo / 60000) * 60000;
 
@@ -239,5 +239,21 @@ export class PriceFeedService {
     }
 
     this.logger.log(`Initialized cache with ${this.latestPrices.size} prices`);
+  }
+  async getPriceByTimestamp(symbol: string, targetMinuteTimestamp: number) {
+    const record = await this.detailedPriceRepo.findOne({
+      where: { symbol, minuteTimestamp: targetMinuteTimestamp },
+    });
+
+    if (!record) return null;
+
+    return {
+      symbol: record.symbol,
+      minuteTimestamp: Number(record.minuteTimestamp),
+      open: Number(record.minuteOpen),
+      high: Number(record.minuteHigh),
+      low: Number(record.minuteLow),
+      close: Number(record.minuteClose),
+    };
   }
 }

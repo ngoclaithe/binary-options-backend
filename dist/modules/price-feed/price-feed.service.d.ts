@@ -18,4 +18,12 @@ export declare class PriceFeedService {
     getAllLatestPrices(): PriceData[];
     private getIntervalInMs;
     initializeCache(symbols: string[]): Promise<void>;
+    getPriceByTimestamp(symbol: string, targetMinuteTimestamp: number): Promise<{
+        symbol: string;
+        minuteTimestamp: number;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+    } | null>;
 }
