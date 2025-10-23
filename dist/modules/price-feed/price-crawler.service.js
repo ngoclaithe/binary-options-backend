@@ -8,6 +8,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -16,13 +19,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PriceCrawlerService = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
+const typeorm_1 = require("@nestjs/typeorm");
+const typeorm_2 = require("typeorm");
 const axios_1 = __importDefault(require("axios"));
+const detailed_price_data_entity_1 = require("./entities/detailed-price-data.entity");
 let PriceCrawlerService = PriceCrawlerService_1 = class PriceCrawlerService {
     configService;
+    detailedPriceRepo;
     logger = new common_1.Logger(PriceCrawlerService_1.name);
     baseUrl;
-    constructor(configService) {
+    previousPriceData = new Map();
+    constructor(configService, detailedPriceRepo) {
         this.configService = configService;
+        this.detailedPriceRepo = detailedPriceRepo;
         this.baseUrl =
             this.configService.get('app.priceApiUrl') ||
                 'https://api.binance.com/api/v3';
@@ -36,7 +45,7 @@ let PriceCrawlerService = PriceCrawlerService_1 = class PriceCrawlerService {
                 params: { symbol },
             });
             const ticker24h = ticker24hResponse.data;
-            return {
+            const currentData = {
                 symbol: symbol,
                 price: parseFloat(tickerResponse.data.price),
                 timestamp: Date.now(),
@@ -46,11 +55,87 @@ let PriceCrawlerService = PriceCrawlerService_1 = class PriceCrawlerService {
                 close: parseFloat(ticker24h.lastPrice),
                 volume: parseFloat(ticker24h.volume),
             };
+            await this.generateAndSaveDetailedPrices(symbol, currentData);
+            return currentData;
         }
         catch (error) {
             this.logger.error(`Failed to fetch price for ${symbol} from Binance: ${error.message}`);
             return null;
         }
+    }
+    async generateAndSaveDetailedPrices(symbol, currentData) {
+        const previousData = this.previousPriceData.get(symbol);
+        if (!previousData) {
+            this.previousPriceData.set(symbol, currentData);
+            return;
+        }
+        try {
+            const secondsData = [];
+            const minuteTimestamp = this.roundToMinute(previousData.timestamp);
+            let minuteHigh = -Infinity;
+            let minuteLow = Infinity;
+            for (let i = 0; i < 60; i++) {
+                const progress = i / 60;
+                const timestamp = previousData.timestamp + i * 1000;
+                const interpolated = this.interpolatePrice(previousData, currentData, progress);
+                minuteHigh = Math.max(minuteHigh, interpolated.high);
+                minuteLow = Math.min(minuteLow, interpolated.low);
+                secondsData.push({
+                    t: timestamp,
+                    p: interpolated.price,
+                    o: interpolated.open,
+                    h: interpolated.high,
+                    l: interpolated.low,
+                    c: interpolated.close,
+                    v: interpolated.volume,
+                });
+            }
+            const detailedPrice = this.detailedPriceRepo.create({
+                symbol,
+                minuteTimestamp,
+                minuteOpen: secondsData[0].o,
+                minuteHigh,
+                minuteLow,
+                minuteClose: secondsData[secondsData.length - 1].c,
+                minuteVolume: secondsData.reduce((sum, d) => sum + d.v, 0),
+                secondsData,
+            });
+            await this.detailedPriceRepo.save(detailedPrice);
+            this.logger.debug(`Saved 60 seconds data for ${symbol} at minute ${new Date(minuteTimestamp).toISOString()}`);
+            this.previousPriceData.set(symbol, currentData);
+        }
+        catch (error) {
+            this.logger.error(`Failed to generate detailed prices for ${symbol}: ${error.message}`);
+        }
+    }
+    interpolatePrice(startData, endData, progress) {
+        const basePrice = startData.price + (endData.price - startData.price) * progress;
+        const noise = (Math.random() - 0.5) * basePrice * 0.0005;
+        const price = basePrice + noise;
+        const priceRange = Math.abs(endData.price - startData.price);
+        const volatilityFactor = Math.random() * 0.3;
+        const open = progress === 0
+            ? startData.close
+            : basePrice * (1 + (Math.random() - 0.5) * 0.001);
+        const close = price;
+        const maxOC = Math.max(open, close);
+        const minOC = Math.min(open, close);
+        const high = maxOC + priceRange * volatilityFactor * Math.random();
+        const low = minOC - priceRange * volatilityFactor * Math.random();
+        const baseVolume = (endData.volume - (startData.volume || 0)) / 60;
+        const volumeMultiplier = 1 + Math.abs(progress - 0.5);
+        const volume = baseVolume * volumeMultiplier * (0.8 + Math.random() * 0.4);
+        return {
+            price,
+            open,
+            high,
+            low,
+            close,
+            volume,
+        };
+    }
+    roundToMinute(timestamp) {
+        return Math.floor(timestamp / 60000) * 60000;
     }
     async fetchPriceFromAlternative(symbol) {
         try {
@@ -120,6 +205,8 @@ let PriceCrawlerService = PriceCrawlerService_1 = class PriceCrawlerService {
 exports.PriceCrawlerService = PriceCrawlerService;
 exports.PriceCrawlerService = PriceCrawlerService = PriceCrawlerService_1 = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [config_1.ConfigService])
+    __param(1, (0, typeorm_1.InjectRepository)(detailed_price_data_entity_1.DetailedPriceData)),
+    __metadata("design:paramtypes", [config_1.ConfigService,
+        typeorm_2.Repository])
 ], PriceCrawlerService);
 //# sourceMappingURL=price-crawler.service.js.map

@@ -4,9 +4,10 @@ import { PriceFeedService } from './price-feed.service';
 import { PriceCrawlerService } from './price-crawler.service';
 import { PriceFeedGateway } from './price-feed.gateway';
 import { Price } from './entities/price.entity';
+import { DetailedPriceData} from './entities/detailed-price-data.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Price])],
+  imports: [TypeOrmModule.forFeature([Price, DetailedPriceData])],
   providers: [PriceFeedService, PriceCrawlerService, PriceFeedGateway],
   exports: [PriceFeedService, PriceCrawlerService, PriceFeedGateway],
 })

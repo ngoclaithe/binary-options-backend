@@ -13,12 +13,13 @@ const price_feed_service_1 = require("./price-feed.service");
 const price_crawler_service_1 = require("./price-crawler.service");
 const price_feed_gateway_1 = require("./price-feed.gateway");
 const price_entity_1 = require("./entities/price.entity");
+const detailed_price_data_entity_1 = require("./entities/detailed-price-data.entity");
 let PriceFeedModule = class PriceFeedModule {
 };
 exports.PriceFeedModule = PriceFeedModule;
 exports.PriceFeedModule = PriceFeedModule = __decorate([
     (0, common_1.Module)({
-        imports: [typeorm_1.TypeOrmModule.forFeature([price_entity_1.Price])],
+        imports: [typeorm_1.TypeOrmModule.forFeature([price_entity_1.Price, detailed_price_data_entity_1.DetailedPriceData])],
         providers: [price_feed_service_1.PriceFeedService, price_crawler_service_1.PriceCrawlerService, price_feed_gateway_1.PriceFeedGateway],
         exports: [price_feed_service_1.PriceFeedService, price_crawler_service_1.PriceCrawlerService, price_feed_gateway_1.PriceFeedGateway],
     })
