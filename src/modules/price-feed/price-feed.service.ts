@@ -82,6 +82,79 @@ export class PriceFeedService {
   }
 
   /**
+   * Lấy dữ liệu chi tiết 60 giây cho một phút cụ thể
+   */
+  async getDetailedPriceData(symbol: string, minuteTimestamp: number): Promise<any> {
+    try {
+      const record = await this.detailedPriceRepo.findOne({
+        where: {
+          symbol,
+          minuteTimestamp: minuteTimestamp,
+        },
+      });
+
+      if (!record) {
+        this.logger.warn(
+          `No detailed price data found for ${symbol} at ${new Date(minuteTimestamp).toISOString()}`
+        );
+        return null;
+      }
+
+      return {
+        symbol: record.symbol,
+        minuteTimestamp: Number(record.minuteTimestamp),
+        minuteTime: new Date(Number(record.minuteTimestamp)).toISOString(),
+        summary: {
+          open: Number(record.minuteOpen),
+          high: Number(record.minuteHigh),
+          low: Number(record.minuteLow),
+          close: Number(record.minuteClose),
+          volume: Number(record.minuteVolume),
+        },
+        secondsData: record.secondsData.map((s, index) => {
+          const timestamp = Number(s.t);
+          return {
+            second: index,
+            timestamp: timestamp,
+            time: new Date(timestamp).toISOString(),
+            price: Number(s.p),
+            open: Number(s.o),
+            high: Number(s.h),
+            low: Number(s.l),
+            close: Number(s.c),
+            volume: Number(s.v),
+          };
+        }),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get detailed price data for ${symbol}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Lấy giá tại timestamp cụ thể (minute-level)
+   */
+  async getPriceByTimestamp(symbol: string, targetMinuteTimestamp: number) {
+    const record = await this.detailedPriceRepo.findOne({
+      where: { symbol, minuteTimestamp: targetMinuteTimestamp },
+    });
+
+    if (!record) return null;
+
+    return {
+      symbol: record.symbol,
+      minuteTimestamp: Number(record.minuteTimestamp),
+      open: Number(record.minuteOpen),
+      high: Number(record.minuteHigh),
+      low: Number(record.minuteLow),
+      close: Number(record.minuteClose),
+    };
+  }
+
+  /**
    * Lưu giá vào database
    */
   async savePrice(priceData: PriceData): Promise<Price> {
@@ -239,21 +312,5 @@ export class PriceFeedService {
     }
 
     this.logger.log(`Initialized cache with ${this.latestPrices.size} prices`);
-  }
-  async getPriceByTimestamp(symbol: string, targetMinuteTimestamp: number) {
-    const record = await this.detailedPriceRepo.findOne({
-      where: { symbol, minuteTimestamp: targetMinuteTimestamp },
-    });
-
-    if (!record) return null;
-
-    return {
-      symbol: record.symbol,
-      minuteTimestamp: Number(record.minuteTimestamp),
-      open: Number(record.minuteOpen),
-      high: Number(record.minuteHigh),
-      low: Number(record.minuteLow),
-      close: Number(record.minuteClose),
-    };
   }
 }
