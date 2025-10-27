@@ -26,7 +26,7 @@ export class TradingService {
   ) { }
 
   /**
-   * Tạo lệnh mới - Lấy giá tại thời điểm tạo
+   * Tạo lệnh mới - User đặt lệnh dựa trên giá FE đang show (delay 2 phút)
    */
   async createOrder(
     userId: string,
@@ -58,33 +58,38 @@ export class TradingService {
 
       const symbol = asset.apiSymbol || asset.symbol;
 
-      // 🔹 Lấy giá feed mới nhất (delay 2 phút)
+      // 🔹 Lấy giá feed mới nhất (FE đang hiển thị - delay 2 phút)
       const latestFeed = await this.priceFeedService.getLatestPrice(symbol);
       if (!latestFeed) {
         throw new BadRequestException('Cannot get latest feed price');
       }
-
-      // 🔹 Lấy timestamp hiện tại trong minuteTimestamp (giây thứ mấy trong phút)
+      console.log("Giá trị của lastFeed", latestFeed);
+      // 🔹 Tính giây hiện tại của FE (trong phút delay 2 phút)
       const now = Date.now();
-      const currentMinuteTimestamp = Math.floor(latestFeed.minuteTimestamp / 60000) * 60000;
-      const secondsIntoMinute = Math.floor((now - currentMinuteTimestamp) / 1000);
+      const nowMinuteTimestamp = Math.floor(now / 60000) * 60000;
+      const secondsIntoMinute = Math.floor((now - nowMinuteTimestamp) / 1000);
+      const safeSecond = Math.max(0, Math.min(59, secondsIntoMinute));
 
-      // 🔹 Tìm dữ liệu giá tại giây hiện tại trong secondsData
-      const currentSecondData = latestFeed.secondsData.find(
-        (s: any) => s.second === secondsIntoMinute
+      // 🔹 Lấy giá tại giây hiện tại từ data FE đang show
+      let currentSecondData = latestFeed.secondsData.find(
+        (s: any) => s.second === safeSecond
       );
 
       if (!currentSecondData) {
-        throw new BadRequestException(
-          `No price data found for second ${secondsIntoMinute} in current minute`
-        );
+        currentSecondData = latestFeed.secondsData[latestFeed.secondsData.length - 1];
+        if (!currentSecondData) {
+          throw new BadRequestException('No price data available in latest feed');
+        }
+        console.warn(`[CREATE_ORDER] Using fallback: second ${currentSecondData.second} instead of ${safeSecond}`);
       }
 
-      // 🔹 openPrice chính là close price tại giây hiện tại
-      const openPrice = currentSecondData.close;
-      const openTime = now;
-
-      // 🔹 Tính closeTime = openTime + duration
+      // 🔹 openPrice = giá close tại giây user đặt lệnh (trên FE)
+      const openPrice = Number(currentSecondData.close);
+      
+      // 🔹 openTime = timestamp thực tế của giây đó (trong data delay 2 phút)
+      const openTime = Number(currentSecondData.timestamp);
+      
+      // 🔹 closeTime = openTime + duration
       const closeTime = openTime + createOrderDto.duration * 1000;
 
       console.log(`[CREATE_ORDER] Order created`, {
@@ -94,8 +99,8 @@ export class TradingService {
         openPrice,
         closeTime: new Date(closeTime).toISOString(),
         duration: createOrderDto.duration,
-        currentMinute: new Date(currentMinuteTimestamp).toISOString(),
-        secondInMinute: secondsIntoMinute,
+        feedMinute: new Date(latestFeed.minuteTimestamp).toISOString(),
+        secondUsed: currentSecondData.second,
       });
 
       // 🔹 Tạo order
@@ -125,7 +130,7 @@ export class TradingService {
   }
 
   /**
-   * Đóng lệnh và tính toán kết quả
+   * Đóng lệnh - Giá close đã có sẵn trong DB (vì đã qua 2 phút)
    */
   async closeOrder(orderId: string): Promise<Order> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -156,19 +161,22 @@ export class TradingService {
         closeTime: new Date(Number(order.closeTime)).toISOString(),
       });
 
-      // 🔹 Tính toán minuteTimestamp và second cho closeTime
+      // 🔹 closeTime đã được tính từ openTime + duration
       const closeTimeMs = Number(order.closeTime);
+      
+      // 🔹 Tính phút và giây của closeTime
       const closeMinuteTimestamp = Math.floor(closeTimeMs / 60000) * 60000;
       const closeSecondInMinute = Math.floor((closeTimeMs - closeMinuteTimestamp) / 1000);
+      const safeCloseSecond = Math.max(0, Math.min(59, closeSecondInMinute));
 
       console.log(`[CLOSE_ORDER] Calculated close position`, {
         closeTimeMs,
         closeMinute: new Date(closeMinuteTimestamp).toISOString(),
-        closeSecondInMinute,
+        closeSecondInMinute: safeCloseSecond,
       });
 
-      // 🔹 Lấy dữ liệu phút tương ứng
-      const closeMinuteData = await this.priceFeedService.getPriceByTimestamp(
+      // 🔹 Lấy dữ liệu chi tiết của phút closeTime (đã có sẵn trong DB)
+      const closeMinuteData = await this.priceFeedService.getDetailedPriceData(
         symbol,
         closeMinuteTimestamp,
       );
@@ -179,35 +187,28 @@ export class TradingService {
         );
       }
 
-      // 🔹 Lấy chi tiết 60 giây để tìm giá đóng chính xác
-      const detailedData = await this.priceFeedService.getDetailedPriceData(
-        symbol,
-        closeMinuteTimestamp,
-      );
-
-      if (!detailedData || !detailedData.secondsData) {
-        throw new BadRequestException(
-          `No detailed seconds data found for ${symbol} at ${new Date(closeMinuteTimestamp).toISOString()}`
-        );
-      }
-
-      // 🔹 Tìm giá tại giây cụ thể
-      const closeSecondData = detailedData.secondsData.find(
-        (s: any) => s.second === closeSecondInMinute
+      // 🔹 Tìm giá tại giây closeTime
+      let closeSecondData = closeMinuteData.secondsData.find(
+        (s: any) => s.second === safeCloseSecond
       );
 
       if (!closeSecondData) {
-        console.warn(`[CLOSE_ORDER] No exact second data, using minute close price`);
-        // Fallback: sử dụng close của phút nếu không tìm thấy giây cụ thể
-        order.closePrice = Number(closeMinuteData.close);
-      } else {
-        order.closePrice = Number(closeSecondData.close);
+        console.warn(`[CLOSE_ORDER] No exact second data for second ${safeCloseSecond}, using last available`);
+        closeSecondData = closeMinuteData.secondsData[closeMinuteData.secondsData.length - 1];
+        
+        if (!closeSecondData) {
+          throw new BadRequestException(
+            `No seconds data available for ${symbol} at ${new Date(closeMinuteTimestamp).toISOString()}`
+          );
+        }
       }
+
+      order.closePrice = Number(closeSecondData.close);
 
       console.log(`[CLOSE_ORDER] Price data`, {
         openPrice: order.openPrice,
         closePrice: order.closePrice,
-        closeSecond: closeSecondInMinute,
+        closeSecond: safeCloseSecond,
       });
 
       const closePrice = Number(order.closePrice);
@@ -412,9 +413,6 @@ export class TradingService {
     });
   }
 
-  /**
-   * Lấy position statistics
-   */
   async getPositionStats(userId: string): Promise<Position> {
     let position = await this.positionRepository.findOne({
       where: { userId },

@@ -39,28 +39,38 @@ let PositionSettlementCron = PositionSettlementCron_1 = class PositionSettlement
         this.isRunning = true;
         try {
             const currentTime = Date.now();
+            const twoMinutesAgo = currentTime - (2 * 60 * 1000);
             const expiredOrders = await this.orderRepository.find({
                 where: {
                     status: order_entity_1.OrderStatus.ACTIVE,
-                    closeTime: (0, typeorm_2.LessThanOrEqual)(currentTime),
+                    closeTime: (0, typeorm_2.LessThanOrEqual)(twoMinutesAgo),
                 },
                 relations: ['asset', 'user'],
             });
             if (expiredOrders.length === 0) {
                 return;
             }
-            this.logger.log(`Found ${expiredOrders.length} expired orders to settle`);
+            this.logger.log(`Found ${expiredOrders.length} expired orders to settle (with 2-min delay)`);
+            let successCount = 0;
+            let failCount = 0;
             for (const order of expiredOrders) {
                 try {
+                    const timeSinceClose = currentTime - Number(order.closeTime);
+                    const minutesSinceClose = Math.floor(timeSinceClose / 60000);
+                    this.logger.debug(`Settling order ${order.id} - Close time: ${new Date(Number(order.closeTime)).toISOString()}, ` +
+                        `Time since close: ${minutesSinceClose}m ${Math.floor((timeSinceClose % 60000) / 1000)}s`);
                     const closedOrder = await this.tradingService.closeOrder(order.id);
                     this.tradingGateway.notifyOrderClosed(order.userId, closedOrder);
-                    this.logger.log(`Settled order ${order.id} for user ${order.userId} - Status: ${closedOrder.status}`);
+                    successCount++;
+                    this.logger.log(`✅ Settled order ${order.id} for user ${order.userId} - Status: ${closedOrder.status}, ` +
+                        `Open: ${closedOrder.openPrice}, Close: ${closedOrder.closePrice}, Profit: ${closedOrder.profitAmount}`);
                 }
                 catch (error) {
-                    this.logger.error(`Failed to settle order ${order.id}: ${error.message}`, error.stack);
+                    failCount++;
+                    this.logger.error(`❌ Failed to settle order ${order.id}: ${error.message}`, error.stack);
                 }
             }
-            this.logger.log(`Successfully settled ${expiredOrders.length} orders`);
+            this.logger.log(`Settlement completed: ${successCount} succeeded, ${failCount} failed`);
         }
         catch (error) {
             this.logger.error(`Failed to settle expired orders: ${error.message}`, error.stack);

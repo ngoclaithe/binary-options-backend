@@ -20,6 +20,7 @@ export class PositionSettlementCron {
 
   /**
    * Cron job chạy mỗi 10 giây để đóng các lệnh đã hết hạn
+   * Lưu ý: Chỉ đóng order khi đã qua 2 phút kể từ closeTime (để có data)
    */
   @Cron('*/10 * * * * *')
   async settleExpiredOrders() {
@@ -31,12 +32,14 @@ export class PositionSettlementCron {
 
     try {
       const currentTime = Date.now();
+      
+      // 🔹 Tìm orders đã hết hạn VÀ đã qua 2 phút (để có dữ liệu giá)
+      const twoMinutesAgo = currentTime - (2 * 60 * 1000);
 
-      // Tìm các orders active đã hết hạn
       const expiredOrders = await this.orderRepository.find({
         where: {
           status: OrderStatus.ACTIVE,
-          closeTime: LessThanOrEqual(currentTime),
+          closeTime: LessThanOrEqual(twoMinutesAgo), // closeTime + 2 phút <= now
         },
         relations: ['asset', 'user'],
       });
@@ -45,28 +48,47 @@ export class PositionSettlementCron {
         return;
       }
 
-      this.logger.log(`Found ${expiredOrders.length} expired orders to settle`);
+      this.logger.log(
+        `Found ${expiredOrders.length} expired orders to settle (with 2-min delay)`,
+      );
+
+      let successCount = 0;
+      let failCount = 0;
 
       // Đóng từng lệnh
       for (const order of expiredOrders) {
         try {
+          const timeSinceClose = currentTime - Number(order.closeTime);
+          const minutesSinceClose = Math.floor(timeSinceClose / 60000);
+
+          this.logger.debug(
+            `Settling order ${order.id} - Close time: ${new Date(Number(order.closeTime)).toISOString()}, ` +
+            `Time since close: ${minutesSinceClose}m ${Math.floor((timeSinceClose % 60000) / 1000)}s`,
+          );
+
           const closedOrder = await this.tradingService.closeOrder(order.id);
 
           // Notify user qua WebSocket
           this.tradingGateway.notifyOrderClosed(order.userId, closedOrder);
 
+          successCount++;
+
           this.logger.log(
-            `Settled order ${order.id} for user ${order.userId} - Status: ${closedOrder.status}`,
+            `✅ Settled order ${order.id} for user ${order.userId} - Status: ${closedOrder.status}, ` +
+            `Open: ${closedOrder.openPrice}, Close: ${closedOrder.closePrice}, Profit: ${closedOrder.profitAmount}`,
           );
         } catch (error) {
+          failCount++;
           this.logger.error(
-            `Failed to settle order ${order.id}: ${error.message}`,
+            `❌ Failed to settle order ${order.id}: ${error.message}`,
             error.stack,
           );
         }
       }
 
-      this.logger.log(`Successfully settled ${expiredOrders.length} orders`);
+      this.logger.log(
+        `Settlement completed: ${successCount} succeeded, ${failCount} failed`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to settle expired orders: ${error.message}`,

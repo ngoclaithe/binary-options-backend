@@ -55,14 +55,32 @@ let TradingService = class TradingService {
             if (!latestFeed) {
                 throw new common_1.BadRequestException('Cannot get latest feed price');
             }
-            const nextMinuteTimestamp = Number(latestFeed.minuteTimestamp) + 60 * 1000;
-            const nextBlock = await this.priceFeedService.getPriceByTimestamp(symbol, nextMinuteTimestamp);
-            if (!nextBlock) {
-                throw new common_1.BadRequestException(`No price data for next block ${new Date(nextMinuteTimestamp).toISOString()}`);
+            console.log("Giá trị của lastFeed", latestFeed);
+            const now = Date.now();
+            const nowMinuteTimestamp = Math.floor(now / 60000) * 60000;
+            const secondsIntoMinute = Math.floor((now - nowMinuteTimestamp) / 1000);
+            const safeSecond = Math.max(0, Math.min(59, secondsIntoMinute));
+            let currentSecondData = latestFeed.secondsData.find((s) => s.second === safeSecond);
+            if (!currentSecondData) {
+                currentSecondData = latestFeed.secondsData[latestFeed.secondsData.length - 1];
+                if (!currentSecondData) {
+                    throw new common_1.BadRequestException('No price data available in latest feed');
+                }
+                console.warn(`[CREATE_ORDER] Using fallback: second ${currentSecondData.second} instead of ${safeSecond}`);
             }
-            const openPrice = nextBlock.open;
-            const openTime = nextMinuteTimestamp;
+            const openPrice = Number(currentSecondData.close);
+            const openTime = Number(currentSecondData.timestamp);
             const closeTime = openTime + createOrderDto.duration * 1000;
+            console.log(`[CREATE_ORDER] Order created`, {
+                userId,
+                symbol,
+                openTime: new Date(openTime).toISOString(),
+                openPrice,
+                closeTime: new Date(closeTime).toISOString(),
+                duration: createOrderDto.duration,
+                feedMinute: new Date(latestFeed.minuteTimestamp).toISOString(),
+                secondUsed: currentSecondData.second,
+            });
             const order = queryRunner.manager.create(order_entity_1.Order, {
                 userId,
                 assetId: createOrderDto.assetId,
@@ -107,31 +125,45 @@ let TradingService = class TradingService {
                 id: order.id,
                 symbol,
                 openPrice: order.openPrice,
-                closeTime: order.closeTime,
-                closeTimeISO: new Date(Number(order.closeTime)).toISOString(),
+                openTime: new Date(Number(order.openTime)).toISOString(),
+                closeTime: new Date(Number(order.closeTime)).toISOString(),
             });
-            if (!order.closeTime || isNaN(Number(order.closeTime))) {
-                throw new common_1.BadRequestException(`Invalid closeTime for order ${order.id}: ${order.closeTime}`);
+            const closeTimeMs = Number(order.closeTime);
+            const closeMinuteTimestamp = Math.floor(closeTimeMs / 60000) * 60000;
+            const closeSecondInMinute = Math.floor((closeTimeMs - closeMinuteTimestamp) / 1000);
+            const safeCloseSecond = Math.max(0, Math.min(59, closeSecondInMinute));
+            console.log(`[CLOSE_ORDER] Calculated close position`, {
+                closeTimeMs,
+                closeMinute: new Date(closeMinuteTimestamp).toISOString(),
+                closeSecondInMinute: safeCloseSecond,
+            });
+            const closeMinuteData = await this.priceFeedService.getDetailedPriceData(symbol, closeMinuteTimestamp);
+            if (!closeMinuteData) {
+                throw new common_1.BadRequestException(`No price data found for ${symbol} at minute ${new Date(closeMinuteTimestamp).toISOString()}`);
             }
-            const closeBlock = await this.priceFeedService.getPriceByTimestamp(symbol, order.closeTime);
-            console.log(`[CLOSE_ORDER] closeBlock`, closeBlock);
-            if (!closeBlock) {
-                throw new common_1.BadRequestException(`No price block found for ${symbol} at closeTime ${order.closeTime}`);
+            let closeSecondData = closeMinuteData.secondsData.find((s) => s.second === safeCloseSecond);
+            if (!closeSecondData) {
+                console.warn(`[CLOSE_ORDER] No exact second data for second ${safeCloseSecond}, using last available`);
+                closeSecondData = closeMinuteData.secondsData[closeMinuteData.secondsData.length - 1];
+                if (!closeSecondData) {
+                    throw new common_1.BadRequestException(`No seconds data available for ${symbol} at ${new Date(closeMinuteTimestamp).toISOString()}`);
+                }
             }
-            const closePriceRaw = closeBlock.close;
-            const closePrice = Number(closePriceRaw);
+            order.closePrice = Number(closeSecondData.close);
+            console.log(`[CLOSE_ORDER] Price data`, {
+                openPrice: order.openPrice,
+                closePrice: order.closePrice,
+                closeSecond: safeCloseSecond,
+            });
+            const closePrice = Number(order.closePrice);
             const openPrice = Number(order.openPrice);
-            if (closePriceRaw === undefined ||
-                closePriceRaw === null ||
-                isNaN(closePrice) ||
-                isNaN(openPrice)) {
+            if (isNaN(closePrice) || isNaN(openPrice)) {
                 console.error('[CLOSE_ORDER] Invalid price data', {
                     openPrice: order.openPrice,
-                    closePrice: closeBlock.close,
+                    closePrice: order.closePrice,
                 });
-                throw new common_1.BadRequestException(`Invalid price data (open=${order.openPrice}, close=${closeBlock.close})`);
+                throw new common_1.BadRequestException(`Invalid price data (open=${order.openPrice}, close=${order.closePrice})`);
             }
-            order.closePrice = closePrice;
             const priceDiff = closePrice - openPrice;
             let result = 'DRAW';
             if (priceDiff === 0) {
@@ -147,12 +179,6 @@ let TradingService = class TradingService {
                 order.profitAmount =
                     (Number(order.investAmount) * order.profitPercentage) / 100;
                 if (isNaN(order.profitAmount)) {
-                    console.error(`[CLOSE_ORDER] Failed to calculate profit amount`, {
-                        orderId: order.id,
-                        investAmount: order.investAmount,
-                        profitPercentage: order.profitPercentage,
-                        result: order.profitAmount,
-                    });
                     throw new common_1.BadRequestException(`Failed to calculate profit amount. investAmount: ${order.investAmount}, profitPercentage: ${order.profitPercentage}`);
                 }
                 await this.walletService.processTradeWin(order.userId, Number(order.investAmount), Number(order.profitAmount), order.id);
@@ -162,11 +188,6 @@ let TradingService = class TradingService {
                 order.status = order_entity_1.OrderStatus.LOST;
                 order.profitAmount = -Number(order.investAmount);
                 if (isNaN(order.profitAmount)) {
-                    console.error(`[CLOSE_ORDER] Failed to calculate loss amount`, {
-                        orderId: order.id,
-                        investAmount: order.investAmount,
-                        result: order.profitAmount,
-                    });
                     throw new common_1.BadRequestException(`Failed to calculate loss amount. investAmount: ${order.investAmount}`);
                 }
                 await this.walletService.processTradeLoss(order.userId, Number(order.investAmount), order.id);
@@ -176,8 +197,6 @@ let TradingService = class TradingService {
                 closePrice,
                 diff: priceDiff,
                 profit: order.profitAmount,
-                investAmount: order.investAmount,
-                profitPercentage: order.profitPercentage,
             });
             await queryRunner.manager.save(order);
             await this.updatePositionStats(order.userId, order.status, order);
@@ -204,7 +223,6 @@ let TradingService = class TradingService {
         const investAmount = Number(order.investAmount) || 0;
         const profitAmount = Number(order.profitAmount) || 0;
         if (isNaN(investAmount)) {
-            console.error(`[UPDATE_POSITION_STATS] Invalid investAmount for order ${order.id}: ${order.investAmount}`);
             throw new common_1.BadRequestException('Invalid investment amount');
         }
         position.totalTrades = position.totalTrades || 0;
@@ -220,7 +238,6 @@ let TradingService = class TradingService {
         position.totalInvested = currentTotalInvested + investAmount;
         if (orderStatus === order_entity_1.OrderStatus.WON) {
             if (isNaN(profitAmount)) {
-                console.error(`[UPDATE_POSITION_STATS] Invalid profitAmount for order ${order.id}: ${order.profitAmount}`);
                 throw new common_1.BadRequestException('Invalid profit amount');
             }
             position.totalWins += 1;
@@ -237,7 +254,6 @@ let TradingService = class TradingService {
             const currentTotalLoss = Number(position.totalLoss) || 0;
             const lossAmount = Math.abs(profitAmount);
             if (isNaN(lossAmount)) {
-                console.error(`[UPDATE_POSITION_STATS] Invalid loss amount for order ${order.id}: ${profitAmount}`);
                 throw new common_1.BadRequestException('Invalid loss amount');
             }
             position.totalLoss = currentTotalLoss + lossAmount;
@@ -261,32 +277,6 @@ let TradingService = class TradingService {
         position.totalProfit = Number(position.totalProfit) || 0;
         position.totalLoss = Number(position.totalLoss) || 0;
         position.winRate = Number(position.winRate) || 0;
-        const fieldsToValidate = {
-            totalInvested: position.totalInvested,
-            totalProfit: position.totalProfit,
-            totalLoss: position.totalLoss,
-            winRate: position.winRate,
-        };
-        for (const [field, value] of Object.entries(fieldsToValidate)) {
-            if (isNaN(Number(value)) || value === undefined || value === null) {
-                console.error(`[UPDATE_POSITION_STATS] Invalid ${field}: ${value} for user ${userId}`, {
-                    position: {
-                        totalInvested: position.totalInvested,
-                        totalProfit: position.totalProfit,
-                        totalLoss: position.totalLoss,
-                        winRate: position.winRate,
-                    }
-                });
-                throw new common_1.BadRequestException(`Invalid ${field} value`);
-            }
-        }
-        console.log(`[UPDATE_POSITION_STATS] Saving position for user ${userId}:`, {
-            totalTrades: position.totalTrades,
-            totalInvested: position.totalInvested,
-            totalProfit: position.totalProfit,
-            totalLoss: position.totalLoss,
-            winRate: position.winRate,
-        });
         await this.positionRepository.save(position);
     }
     async getUserOrders(userId, status, limit = 50) {

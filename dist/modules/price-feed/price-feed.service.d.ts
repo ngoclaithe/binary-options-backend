@@ -10,14 +10,7 @@ export declare class PriceFeedService {
     private latestPrices;
     constructor(priceRepository: Repository<Price>, detailedPriceRepo: Repository<DetailedPriceData>, priceCrawlerService: PriceCrawlerService);
     getLatestPrice(symbol: string): Promise<any>;
-    savePrice(priceData: PriceData): Promise<Price>;
-    savePrices(pricesData: PriceData[]): Promise<Price[]>;
-    getPriceHistory(symbol: string, startTime: number, endTime: number, limit?: number): Promise<Price[]>;
-    getPricesByInterval(symbol: string, interval: '1m' | '5m' | '15m' | '1h' | '4h' | '1d', limit?: number): Promise<Price[]>;
-    cleanupOldPrices(olderThanDays?: number): Promise<number>;
-    getAllLatestPrices(): PriceData[];
-    private getIntervalInMs;
-    initializeCache(symbols: string[]): Promise<void>;
+    getDetailedPriceData(symbol: string, minuteTimestamp: number): Promise<any>;
     getPriceByTimestamp(symbol: string, targetMinuteTimestamp: number): Promise<{
         symbol: string;
         minuteTimestamp: number;
@@ -26,4 +19,12 @@ export declare class PriceFeedService {
         low: number;
         close: number;
     } | null>;
+    savePrice(priceData: PriceData): Promise<Price>;
+    savePrices(pricesData: PriceData[]): Promise<Price[]>;
+    getPriceHistory(symbol: string, startTime: number, endTime: number, limit?: number): Promise<Price[]>;
+    getPricesByInterval(symbol: string, interval: '1m' | '5m' | '15m' | '1h' | '4h' | '1d', limit?: number): Promise<Price[]>;
+    cleanupOldPrices(olderThanDays?: number): Promise<number>;
+    getAllLatestPrices(): PriceData[];
+    private getIntervalInMs;
+    initializeCache(symbols: string[]): Promise<void>;
 }
