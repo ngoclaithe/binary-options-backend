@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   Delete,
+  ParseIntPipe
 } from '@nestjs/common';
 import { TradingService } from './trading.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -40,13 +41,9 @@ export class TradingController {
   async getUserOrders(
     @Request() req,
     @Query('status') status?: OrderStatus,
-    @Query('limit') limit: number = 50,
+    @Query('limit', ParseIntPipe) limit = 50,
   ) {
-    return await this.tradingService.getUserOrders(
-      req.user.userId,
-      status,
-      limit,
-    );
+    return this.tradingService.getUserOrders(req.user.userId, status, limit);
   }
 
   @Get('orders/active')

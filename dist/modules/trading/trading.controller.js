@@ -27,7 +27,7 @@ let TradingController = class TradingController {
         return await this.tradingService.createOrder(req.user.userId, createOrderDto);
     }
     async getUserOrders(req, status, limit = 50) {
-        return await this.tradingService.getUserOrders(req.user.userId, status, limit);
+        return this.tradingService.getUserOrders(req.user.userId, status, limit);
     }
     async getActiveOrders(req) {
         return await this.tradingService.getActiveOrders(req.user.userId);
@@ -56,9 +56,9 @@ __decorate([
     (0, common_1.Get)('orders'),
     __param(0, (0, common_1.Request)()),
     __param(1, (0, common_1.Query)('status')),
-    __param(2, (0, common_1.Query)('limit')),
+    __param(2, (0, common_1.Query)('limit', common_1.ParseIntPipe)),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String, Number]),
+    __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", Promise)
 ], TradingController.prototype, "getUserOrders", null);
 __decorate([

@@ -63,7 +63,6 @@ export class PriceFeedGateway
 
     this.logger.log(`Client ${client.id} subscribed to ${symbols.join(', ')}`);
 
-    // Gửi giá hiện tại ngay lập tức
     this.sendCurrentPrices(client, symbols);
 
     return { status: 'subscribed', symbols };
